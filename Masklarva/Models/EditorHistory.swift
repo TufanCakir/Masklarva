@@ -21,15 +21,17 @@ struct EditorHistory {
         pendingProject = project
     }
 
-    mutating func commit(project: MasklarvaProject) {
-        guard let pendingProject else { return }
+    @discardableResult
+    mutating func commit(project: MasklarvaProject) -> Bool {
+        guard let pendingProject else { return false }
         self.pendingProject = nil
-        guard pendingProject != project else { return }
+        guard pendingProject != project else { return false }
         undoStack.append(pendingProject)
         if undoStack.count > capacity {
             undoStack.removeFirst(undoStack.count - capacity)
         }
         redoStack.removeAll()
+        return true
     }
 
     mutating func undo(currentProject: MasklarvaProject) -> MasklarvaProject? {

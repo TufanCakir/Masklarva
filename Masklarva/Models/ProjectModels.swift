@@ -1,6 +1,6 @@
 import Foundation
 
-struct MasklarvaScene: Identifiable, Equatable {
+struct MasklarvaScene: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var name: String
     var document: ModelDocument
@@ -16,7 +16,7 @@ struct MasklarvaScene: Identifiable, Equatable {
     }
 }
 
-struct MasklarvaProject: Equatable {
+struct MasklarvaProject: Codable, Equatable, Sendable {
     var id: UUID
     var name: String
     private(set) var scenes: [MasklarvaScene]

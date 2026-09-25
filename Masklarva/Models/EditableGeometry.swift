@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct MeshControlPoint: Identifiable, Equatable {
+struct MeshControlPoint: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var position: SIMD3<Float>
 
@@ -17,7 +17,7 @@ struct MeshControlPoint: Identifiable, Equatable {
     }
 }
 
-struct SkeletonJoint: Identifiable, Equatable {
+struct SkeletonJoint: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var name: String
     var parentID: UUID?
@@ -36,7 +36,7 @@ struct SkeletonJoint: Identifiable, Equatable {
     }
 }
 
-struct VertexWeight: Equatable {
+struct VertexWeight: Codable, Equatable, Sendable {
     var pointID: UUID
     var jointID: UUID
     var weight: Float
@@ -51,7 +51,7 @@ struct VertexWeight: Equatable {
 /// Editierbare Geometrie und Rig-Daten bleiben unabhängig von RealityKit.
 /// Dadurch können Werkzeuge, Undo/Redo und später USD-Import/Export dieselbe
 /// Datenquelle nutzen.
-struct EditableGeometry: Equatable {
+struct EditableGeometry: Codable, Equatable, Sendable {
     var points: [MeshControlPoint] = []
     var triangleIndices: [UInt32] = []
     var joints: [SkeletonJoint] = []

@@ -128,7 +128,7 @@ struct ProjectMaterial: Identifiable, Codable, Hashable, Transferable {
 
     var editorMaterial: EditorMaterial {
         EditorMaterial(
-            color: color,
+            color: LinearColor(red: red, green: green, blue: blue),
             metallic: metallic,
             roughness: roughness
         )

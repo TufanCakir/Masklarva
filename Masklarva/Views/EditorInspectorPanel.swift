@@ -74,7 +74,10 @@ struct EditorInspectorPanel: View {
         } label: {
             Label("Transform", systemImage: selectedTool.symbol)
         }
-        .disabled(viewModel.document.selectedObjectIsLocked)
+        .disabled(
+            viewModel.document.selectedObjectIsLocked
+                || viewModel.selectedObjectIsGroup
+        )
     }
 
     private func valueRow(
@@ -131,7 +134,10 @@ struct EditorInspectorPanel: View {
         } label: {
             Label("Material", systemImage: "paintpalette.fill")
         }
-        .disabled(viewModel.document.selectedObjectIsLocked)
+        .disabled(
+            viewModel.document.selectedObjectIsLocked
+                || viewModel.selectedObjectIsGroup
+        )
     }
 
     private func inspectorSlider(
@@ -205,11 +211,11 @@ struct EditorInspectorPanel: View {
     private var materialColorBinding: Binding<Color> {
         Binding {
             guard let index = viewModel.document.selectedIndex else { return .white }
-            return viewModel.document.objects[index].material.color
+            return viewModel.document.objects[index].material.color.swiftUIColor
         } set: { newValue in
             guard let index = viewModel.document.selectedIndex else { return }
             viewModel.beginChange()
-            viewModel.document.objects[index].material.color = newValue
+            viewModel.document.objects[index].material.color = LinearColor(newValue)
             viewModel.document.commitChange()
             viewModel.endChange()
         }

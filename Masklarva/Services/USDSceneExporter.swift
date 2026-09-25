@@ -48,7 +48,7 @@ enum USDSceneExporter {
     private static func makeRealityEntity(document: ModelDocument) -> Entity {
         let root = Entity()
         root.name = "ClayStudioScene"
-        for object in document.objects where object.isVisible {
+        for object in document.renderableObjects {
             let mesh: MeshResource
             if !object.editableGeometry.points.isEmpty {
                 var descriptor = MeshDescriptor(name: object.name)
@@ -73,7 +73,9 @@ enum USDSceneExporter {
                     }
             }
             var material = PhysicallyBasedMaterial()
-            material.baseColor = .init(tint: UIColor(object.material.color))
+            material.baseColor = .init(
+                tint: UIColor(object.material.color.swiftUIColor)
+            )
             material.metallic = .init(floatLiteral: object.material.metallic)
             material.roughness = .init(floatLiteral: object.material.roughness)
             let entity = ModelEntity(mesh: mesh, materials: [material])
@@ -94,7 +96,7 @@ enum USDSceneExporter {
         to url: URL
     ) throws {
         let scene = SCNScene()
-        for object in document.objects where object.isVisible {
+        for object in document.renderableObjects {
             let geometry: SCNGeometry
             if !object.editableGeometry.points.isEmpty {
                 let vertices = object.editableGeometry.points.map {
@@ -134,7 +136,9 @@ enum USDSceneExporter {
                     }
             }
             let material = SCNMaterial()
-            material.diffuse.contents = UIColor(object.material.color)
+            material.diffuse.contents = UIColor(
+                object.material.color.swiftUIColor
+            )
             material.metalness.contents = object.material.metallic
             material.roughness.contents = object.material.roughness
             geometry.materials = [material]
@@ -167,7 +171,7 @@ enum USDSceneExporter {
     }
 
     private static func makeUSDA(document: ModelDocument) -> String {
-        let objects = document.objects.filter(\.isVisible).map(makeObject)
+        let objects = document.renderableObjects.map(makeObject)
             .joined(separator: "\n")
         return """
             #usda 1.0

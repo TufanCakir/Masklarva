@@ -12,6 +12,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct HomeView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = EditorViewModel()
     @State private var isToolShelfVisible = false
     @State private var isInspectorVisible = false
@@ -104,6 +105,29 @@ struct HomeView: View {
             } message: {
                 Text("Die Szene und alle enthaltenen Objekte werden entfernt.")
             }
+            .alert(
+                "Projektfehler",
+                isPresented: Binding(
+                    get: { viewModel.projectStorageError != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            viewModel.projectStorageError = nil
+                        }
+                    }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.projectStorageError ?? "Unbekannter Fehler")
+            }
+            .task {
+                await viewModel.loadAutosavedProject()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase != .active {
+                    viewModel.saveProject()
+                }
+            }
         }
     }
 
@@ -129,8 +153,17 @@ struct HomeView: View {
             }
             .disabled(!viewModel.canRedo)
 
-            Button("Projekt", systemImage: "folder") {
-                isProjectPanelVisible = true
+            Menu("Projekt", systemImage: "folder") {
+                Button("Projektbibliothek", systemImage: "folder") {
+                    isProjectPanelVisible = true
+                }
+                Button("Jetzt sichern", systemImage: "square.and.arrow.down") {
+                    viewModel.saveProject()
+                }
+                .disabled(viewModel.isSavingProject)
+                if let lastSavedAt = viewModel.lastSavedAt {
+                    Text("Gesichert: \(lastSavedAt, format: .dateTime.hour().minute().second())")
+                }
             }
 
             Menu("Szene", systemImage: "square.stack.3d.up") {
@@ -172,6 +205,31 @@ struct HomeView: View {
                 }
                 Button("Duplizieren", systemImage: "plus.square.on.square") {
                     viewModel.duplicateSelection()
+                }
+                Menu("Überordnen", systemImage: "arrow.turn.down.right") {
+                    ForEach(viewModel.parentCandidates) { object in
+                        Button(object.name) {
+                            viewModel.parentSelection(to: object.id)
+                        }
+                    }
+                    Divider()
+                    Button("Überordnung lösen", systemImage: "arrow.uturn.backward") {
+                        viewModel.unparentSelection()
+                    }
+                    .disabled(!viewModel.selectedObjectHasParent)
+                }
+                Menu("Gruppieren", systemImage: "folder.badge.plus") {
+                    if viewModel.selectedObjectIsGroup {
+                        Button("Gruppe auflösen", systemImage: "folder.badge.minus") {
+                            viewModel.ungroupSelection()
+                        }
+                    } else {
+                        ForEach(viewModel.groupCandidates) { object in
+                            Button("Mit \(object.name)") {
+                                viewModel.groupSelection(with: object.id)
+                            }
+                        }
+                    }
                 }
                 Divider()
                 Button("Kopieren", systemImage: "doc.on.doc") {
@@ -318,41 +376,7 @@ struct HomeView: View {
                         }
 
                         ShelfSection("AUSWAHL") {
-                            ForEach(viewModel.document.objects) { object in
-                                Button {
-                                    viewModel.selectObject(object.id)
-                                } label: {
-                                    Label(
-                                        object.name,
-                                        systemImage: object.isLocked
-                                            ? "lock.fill" : object.kind.symbol
-                                    )
-                                    .lineLimit(1)
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        alignment: .leading
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .padding(7)
-                                .background(
-                                    viewModel.document.selectedID == object.id
-                                        ? Color.accentColor.opacity(0.25)
-                                        : .clear,
-                                    in: RoundedRectangle(cornerRadius: 8)
-                                )
-                                .opacity(object.isVisible ? 1 : 0.45)
-                                .contextMenu {
-                                    Button(object.isVisible ? "Ausblenden" : "Einblenden") {
-                                        viewModel.selectObject(object.id)
-                                        viewModel.toggleSelectionVisibility()
-                                    }
-                                    Button(object.isLocked ? "Entsperren" : "Sperren") {
-                                        viewModel.selectObject(object.id)
-                                        viewModel.toggleSelectionLock()
-                                    }
-                                }
-                            }
+                            SceneHierarchyPanel(viewModel: viewModel)
                         }
                     }
                     .padding(12)

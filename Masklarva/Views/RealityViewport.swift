@@ -135,7 +135,7 @@ struct RealityViewport: View {
 
                 if selectedTool == .points {
                     guard let selected = document.selectedIndex,
-                        !document.objects[selected].isLocked
+                        !document.isEffectivelyLocked(document.objects[selected].id)
                     else { return }
                     if draggedPointID == nil {
                         guard let id = pointID(from: value.entity),
@@ -173,7 +173,7 @@ struct RealityViewport: View {
                         document.selectedID = id
                     }
                     guard let selected = document.selectedIndex,
-                        !document.objects[selected].isLocked
+                        !document.isEffectivelyLocked(document.objects[selected].id)
                     else { return }
                     beginProjectChange()
                     document.beginChange()
@@ -299,7 +299,7 @@ struct RealityViewport: View {
         let root = Entity()
         root.name = "EditorRoot"
 
-        for object in document.objects where object.isVisible {
+        for object in document.renderableObjects {
             root.addChild(
                 makeEntity(
                     for: object,
@@ -309,9 +309,12 @@ struct RealityViewport: View {
         }
 
         if let selected = document.objects.first(where: {
-            $0.id == document.selectedID && $0.isVisible
+            $0.id == document.selectedID && !$0.isGroup
+                && document.isEffectivelyVisible($0.id)
         }) {
-            if selectedTool != .points && !selected.isLocked {
+            if selectedTool != .points
+                && !document.isEffectivelyLocked(selected.id)
+            {
                 root.addChild(
                     makeGizmo(at: selected.position, objectID: selected.id)
                 )
@@ -326,7 +329,7 @@ struct RealityViewport: View {
         light.name = "KeyLight"
         light.components.set(
             DirectionalLightComponent(
-                color: UIColor(document.light.color),
+                color: UIColor(document.light.color.swiftUIColor),
                 intensity: document.light.intensity * 1800,
                 isRealWorldProxy: false
             )
@@ -362,7 +365,7 @@ struct RealityViewport: View {
 
     private func updateSceneRoot(_ root: Entity) {
         let validIDs = Set(
-            document.objects.filter(\.isVisible).map { $0.id.uuidString }
+            document.renderableObjects.map { $0.id.uuidString }
         )
 
         for child in root.children {
@@ -373,7 +376,7 @@ struct RealityViewport: View {
             }
         }
 
-        for object in document.objects where object.isVisible {
+        for object in document.renderableObjects {
             let entity: ModelEntity
             if let existing = root.findEntity(named: object.id.uuidString)
                 as? ModelEntity
@@ -394,13 +397,16 @@ struct RealityViewport: View {
         }
 
         if let selected = document.objects.first(where: {
-            $0.id == document.selectedID && $0.isVisible
+            $0.id == document.selectedID && !$0.isGroup
+                && document.isEffectivelyVisible($0.id)
         }) {
             let expectedName = gizmoName(for: selected.id)
             let existingGizmo = root.children.first {
                 $0.name.hasPrefix("gizmoRoot:")
             }
-            if selectedTool == .points || selected.isLocked {
+            if selectedTool == .points
+                || document.isEffectivelyLocked(selected.id)
+            {
                 existingGizmo?.removeFromParent()
             } else if existingGizmo?.name == expectedName {
                 existingGizmo?.position = selected.position
@@ -554,7 +560,9 @@ struct RealityViewport: View {
         selected: Bool
     ) -> PhysicallyBasedMaterial {
         var material = PhysicallyBasedMaterial()
-        material.baseColor = .init(tint: UIColor(editorMaterial.color))
+        material.baseColor = .init(
+            tint: UIColor(editorMaterial.color.swiftUIColor)
+        )
         material.metallic = .init(floatLiteral: editorMaterial.metallic)
         material.roughness = .init(floatLiteral: editorMaterial.roughness)
         material.clearcoat = .init(floatLiteral: selected ? 0.22 : 0)

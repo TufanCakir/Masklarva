@@ -21,11 +21,18 @@ final class EditorViewModel {
     var cameraMode: CameraNavigationMode = .pan
     var exportArtifact: ExportArtifact?
     var exportError: String?
+    var projectStorageError: String?
+    var lastSavedAt: Date?
+    var isSavingProject = false
     @ObservationIgnored private var history = EditorHistory()
+    @ObservationIgnored private let projectStore: ProjectStore
+    @ObservationIgnored private var autosaveTask: Task<Void, Never>?
+    @ObservationIgnored private var didLoadAutosave = false
 
     init(
         document: ModelDocument? = nil,
-        projectLibrary: ProjectLibraryModel? = nil
+        projectLibrary: ProjectLibraryModel? = nil,
+        projectStore: ProjectStore = ProjectStore()
     ) {
         if let document {
             let scene = MasklarvaScene(name: "Main Scene", document: document)
@@ -38,6 +45,7 @@ final class EditorViewModel {
             project = .sample
         }
         self.projectLibrary = projectLibrary ?? ProjectLibraryModel()
+        self.projectStore = projectStore
     }
 
     var document: ModelDocument {
@@ -51,6 +59,26 @@ final class EditorViewModel {
     var objectCount: Int { document.objects.count }
     var canPaste: Bool { document.canPaste }
     var selectedObjectIsLocked: Bool { document.selectedObjectIsLocked }
+    var selectedObjectIsGroup: Bool {
+        guard let index = document.selectedIndex else { return false }
+        return document.objects[index].isGroup
+    }
+    var selectedObjectHasParent: Bool {
+        guard let index = document.selectedIndex else { return false }
+        return document.objects[index].parentID != nil
+    }
+    var parentCandidates: [SceneObject] {
+        document.objects.filter { document.canParentSelected(to: $0.id) }
+    }
+    var groupCandidates: [SceneObject] {
+        guard let selectedIndex = document.selectedIndex else { return [] }
+        let selectedObject = document.objects[selectedIndex]
+        return document.objects.filter {
+            $0.id != selectedObject.id
+                && $0.parentID == selectedObject.parentID
+                && !document.isEffectivelyLocked($0.id)
+        }
+    }
 
     func addPrimitive(_ kind: PrimitiveKind) {
         performChange { $0.activeDocument.add(kind) }
@@ -63,11 +91,13 @@ final class EditorViewModel {
     func undo() {
         guard let previous = history.undo(currentProject: project) else { return }
         project = previous
+        scheduleAutosave()
     }
 
     func redo() {
         guard let next = history.redo(currentProject: project) else { return }
         project = next
+        scheduleAutosave()
     }
 
     func beginChange() {
@@ -75,7 +105,9 @@ final class EditorViewModel {
     }
 
     func endChange() {
-        history.commit(project: project)
+        if history.commit(project: project) {
+            scheduleAutosave()
+        }
     }
 
     func toggleGrid() {
@@ -99,7 +131,23 @@ final class EditorViewModel {
     func toggleSelectionLock() {
         performChange { $0.activeDocument.toggleSelectedLock() }
     }
-    func selectScene(_ id: UUID) { project.selectScene(id) }
+    func parentSelection(to parentID: UUID) {
+        performChange { $0.activeDocument.parentSelected(to: parentID) }
+    }
+    func unparentSelection() {
+        performChange { $0.activeDocument.unparentSelected() }
+    }
+    func groupSelection(with objectID: UUID) {
+        performChange { $0.activeDocument.groupSelected(with: objectID) }
+    }
+    func ungroupSelection() {
+        performChange { $0.activeDocument.ungroupSelected() }
+    }
+    func selectScene(_ id: UUID) {
+        guard project.activeSceneID != id else { return }
+        project.selectScene(id)
+        scheduleAutosave()
+    }
     func createScene() { performChange { $0.createScene() } }
     func duplicateScene() { performChange { $0.duplicateActiveScene() } }
     func renameScene(to name: String) {
@@ -137,7 +185,8 @@ final class EditorViewModel {
 
     func apply(_ material: ProjectMaterial) -> Bool {
         guard let selected = document.selectedIndex,
-            !document.objects[selected].isLocked
+            !document.isEffectivelyLocked(document.objects[selected].id),
+            !document.objects[selected].isGroup
         else { return false }
         beginChange()
         document.objects[selected].material = material.editorMaterial
@@ -165,11 +214,65 @@ final class EditorViewModel {
         }
     }
 
+    func loadAutosavedProject() async {
+        guard !didLoadAutosave else { return }
+        didLoadAutosave = true
+        do {
+            if let result = try await projectStore.loadAutosave() {
+                project = result.project
+                history = EditorHistory()
+                if result.recoveredFromBackup {
+                    projectStorageError = String(
+                        localized: "Das letzte Projekt war beschädigt. Die vorherige Sicherung wurde wiederhergestellt."
+                    )
+                    return
+                }
+            }
+            projectStorageError = nil
+        } catch {
+            projectStorageError = error.localizedDescription
+        }
+    }
+
+    func saveProject() {
+        autosaveTask?.cancel()
+        let snapshot = project
+        autosaveTask = Task { [weak self] in
+            await self?.persist(snapshot)
+        }
+    }
+
     private func performChange(
         _ mutation: (inout MasklarvaProject) -> Void
     ) {
         beginChange()
         mutation(&project)
         endChange()
+    }
+
+    private func scheduleAutosave() {
+        autosaveTask?.cancel()
+        let snapshot = project
+        autosaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled else { return }
+                await self?.persist(snapshot)
+            } catch {
+                // Cancellation is expected when another edit restarts the debounce.
+            }
+        }
+    }
+
+    private func persist(_ snapshot: MasklarvaProject) async {
+        isSavingProject = true
+        defer { isSavingProject = false }
+        do {
+            try await projectStore.saveAutosave(snapshot)
+            lastSavedAt = .now
+            projectStorageError = nil
+        } catch {
+            projectStorageError = error.localizedDescription
+        }
     }
 }
