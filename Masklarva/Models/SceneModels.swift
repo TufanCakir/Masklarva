@@ -8,11 +8,6 @@
 import Foundation
 import SwiftUI
 
-struct SceneSnapshot: Equatable {
-    var objects: [SceneObject]
-    var selectedID: UUID?
-}
-
 struct ModelDocument: Equatable {
     var objects: [SceneObject]
     var selectedID: UUID?
@@ -24,9 +19,7 @@ struct ModelDocument: Equatable {
     var moveSnap: Float = 0.25
     var rotationSnapDegrees: Float = 15
     var scaleSnap: Float = 0.1
-    private var undoStack: [SceneSnapshot] = []
-    private var redoStack: [SceneSnapshot] = []
-    private var pendingSnapshot: SceneSnapshot?
+    private var objectClipboard: SceneObject?
 
     static let sample: ModelDocument = {
         let cube = SceneObject(
@@ -43,6 +36,8 @@ struct ModelDocument: Equatable {
         )
     }()
 
+    static let empty = ModelDocument(objects: [], selectedID: nil)
+
     var selectedIndex: Int? {
         objects.firstIndex { $0.id == selectedID }
     }
@@ -52,8 +47,11 @@ struct ModelDocument: Equatable {
         return objects[selectedIndex].name
     }
 
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
+    var canPaste: Bool { objectClipboard != nil }
+    var selectedObjectIsLocked: Bool {
+        guard let selectedIndex else { return false }
+        return objects[selectedIndex].isLocked
+    }
 
     mutating func add(_ kind: PrimitiveKind) {
         beginChange()
@@ -84,8 +82,31 @@ struct ModelDocument: Equatable {
         endChange()
     }
 
-    mutating func deleteSelected() {
+    mutating func copySelected() {
         guard let selectedIndex else { return }
+        objectClipboard = objects[selectedIndex]
+    }
+
+    mutating func cutSelected() {
+        guard let selectedIndex, !objects[selectedIndex].isLocked else { return }
+        objectClipboard = objects[selectedIndex]
+        deleteSelected()
+    }
+
+    mutating func paste() {
+        guard var copy = objectClipboard else { return }
+        beginChange()
+        copy.id = UUID()
+        copy.name += " Copy"
+        copy.position.x += 0.25
+        copy.parentID = nil
+        objects.append(copy)
+        selectedID = copy.id
+        endChange()
+    }
+
+    mutating func deleteSelected() {
+        guard let selectedIndex, !objects[selectedIndex].isLocked else { return }
         beginChange()
         objects.remove(at: selectedIndex)
         ensureSelection()
@@ -93,7 +114,7 @@ struct ModelDocument: Equatable {
     }
 
     mutating func sculptSelected(amount: Float) {
-        guard let selectedIndex else { return }
+        guard let selectedIndex, !objects[selectedIndex].isLocked else { return }
         beginChange()
         objects[selectedIndex].scale.y += amount
         objects[selectedIndex].scale.x = max(
@@ -101,6 +122,44 @@ struct ModelDocument: Equatable {
             objects[selectedIndex].scale.x - amount * 0.25
         )
         endChange()
+    }
+
+    mutating func renameSelected(to rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let selectedIndex, !name.isEmpty else { return }
+        beginChange()
+        objects[selectedIndex].name = name
+        endChange()
+    }
+
+    mutating func toggleSelectedVisibility() {
+        guard let selectedIndex else { return }
+        beginChange()
+        objects[selectedIndex].isVisible.toggle()
+        endChange()
+    }
+
+    mutating func toggleSelectedLock() {
+        guard let selectedIndex else { return }
+        beginChange()
+        objects[selectedIndex].isLocked.toggle()
+        endChange()
+    }
+
+    func duplicateForNewScene() -> ModelDocument {
+        var copy = self
+        let idMap = Dictionary(
+            uniqueKeysWithValues: objects.map { ($0.id, UUID()) }
+        )
+        copy.objects = objects.map { object in
+            var duplicate = object
+            duplicate.id = idMap[object.id] ?? UUID()
+            duplicate.parentID = object.parentID.flatMap { idMap[$0] }
+            return duplicate
+        }
+        copy.selectedID = selectedID.flatMap { idMap[$0] }
+        copy.objectClipboard = nil
+        return copy
     }
 
     mutating func ensureSelection() {
@@ -114,43 +173,10 @@ struct ModelDocument: Equatable {
     }
 
     mutating func beginChange() {
-        guard pendingSnapshot == nil else { return }
-        pendingSnapshot = snapshot
+        // Project-wide history is coordinated by EditorViewModel.
     }
 
     mutating func endChange() {
-        guard let pendingSnapshot else { return }
-        self.pendingSnapshot = nil
-        guard pendingSnapshot != snapshot else { return }
-        undoStack.append(pendingSnapshot)
-        if undoStack.count > 100 {
-            undoStack.removeFirst(undoStack.count - 100)
-        }
-        redoStack.removeAll()
-        revision += 1
-    }
-
-    mutating func undo() {
-        guard let previous = undoStack.popLast() else { return }
-        redoStack.append(snapshot)
-        restore(previous)
-    }
-
-    mutating func redo() {
-        guard let next = redoStack.popLast() else { return }
-        undoStack.append(snapshot)
-        restore(next)
-    }
-
-    private var snapshot: SceneSnapshot {
-        SceneSnapshot(objects: objects, selectedID: selectedID)
-    }
-
-    private mutating func restore(_ snapshot: SceneSnapshot) {
-        objects = snapshot.objects
-        selectedID = snapshot.selectedID
-        ensureSelection()
-        pendingSnapshot = nil
         revision += 1
     }
 }
@@ -164,6 +190,9 @@ struct SceneObject: Identifiable, Equatable {
     var scale: SIMD3<Float> = .one
     var material: EditorMaterial
     var editableGeometry = EditableGeometry()
+    var isVisible = true
+    var isLocked = false
+    var parentID: UUID?
 }
 
 struct EditorMaterial: Equatable {

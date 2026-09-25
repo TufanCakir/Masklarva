@@ -48,7 +48,7 @@ enum USDSceneExporter {
     private static func makeRealityEntity(document: ModelDocument) -> Entity {
         let root = Entity()
         root.name = "ClayStudioScene"
-        for object in document.objects {
+        for object in document.objects where object.isVisible {
             let mesh: MeshResource
             if !object.editableGeometry.points.isEmpty {
                 var descriptor = MeshDescriptor(name: object.name)
@@ -94,7 +94,7 @@ enum USDSceneExporter {
         to url: URL
     ) throws {
         let scene = SCNScene()
-        for object in document.objects {
+        for object in document.objects where object.isVisible {
             let geometry: SCNGeometry
             if !object.editableGeometry.points.isEmpty {
                 let vertices = object.editableGeometry.points.map {
@@ -167,7 +167,8 @@ enum USDSceneExporter {
     }
 
     private static func makeUSDA(document: ModelDocument) -> String {
-        let objects = document.objects.map(makeObject).joined(separator: "\n")
+        let objects = document.objects.filter(\.isVisible).map(makeObject)
+            .joined(separator: "\n")
         return """
             #usda 1.0
             (

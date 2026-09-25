@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct EditorInspectorPanel: View {
-    @Binding var document: ModelDocument
+    @Bindable var viewModel: EditorViewModel
     let selectedTool: EditorTool
 
     var body: some View {
@@ -18,13 +18,14 @@ struct EditorInspectorPanel: View {
                     Label("Inspector", systemImage: "slider.horizontal.3")
                         .font(.headline)
                     Spacer()
-                    Text(document.selectedObjectName)
+                    Text(viewModel.document.selectedObjectName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                if document.selectedIndex != nil {
+                if viewModel.document.selectedIndex != nil {
+                    objectStateSection
                     transformSection
                     materialSection
                     snappingSection
@@ -36,6 +37,15 @@ struct EditorInspectorPanel: View {
                 }
             }
             .padding(12)
+        }
+    }
+
+    private var objectStateSection: some View {
+        GroupBox {
+            Toggle("Sichtbar", isOn: selectedObjectBinding(\.isVisible))
+            Toggle("Gesperrt", isOn: selectedObjectBinding(\.isLocked))
+        } label: {
+            Label("Objekt", systemImage: "cube")
         }
     }
 
@@ -64,6 +74,7 @@ struct EditorInspectorPanel: View {
         } label: {
             Label("Transform", systemImage: selectedTool.symbol)
         }
+        .disabled(viewModel.document.selectedObjectIsLocked)
     }
 
     private func valueRow(
@@ -120,6 +131,7 @@ struct EditorInspectorPanel: View {
         } label: {
             Label("Material", systemImage: "paintpalette.fill")
         }
+        .disabled(viewModel.document.selectedObjectIsLocked)
     }
 
     private func inspectorSlider(
@@ -144,20 +156,26 @@ struct EditorInspectorPanel: View {
     private var snappingSection: some View {
         GroupBox {
             VStack(spacing: 8) {
-                Toggle("Snapping", isOn: $document.snapEnabled)
-                Picker("Position", selection: $document.moveSnap) {
+                Toggle(
+                    "Snapping",
+                    isOn: documentBinding(\.snapEnabled)
+                )
+                Picker("Position", selection: documentBinding(\.moveSnap)) {
                     Text("0,1").tag(Float(0.1))
                     Text("0,25").tag(Float(0.25))
                     Text("0,5").tag(Float(0.5))
                     Text("1").tag(Float(1))
                 }
-                Picker("Winkel", selection: $document.rotationSnapDegrees) {
+                Picker(
+                    "Winkel",
+                    selection: documentBinding(\.rotationSnapDegrees)
+                ) {
                     Text("5°").tag(Float(5))
                     Text("15°").tag(Float(15))
                     Text("30°").tag(Float(30))
                     Text("45°").tag(Float(45))
                 }
-                Picker("Größe", selection: $document.scaleSnap) {
+                Picker("Größe", selection: documentBinding(\.scaleSnap)) {
                     Text("0,05").tag(Float(0.05))
                     Text("0,1").tag(Float(0.1))
                     Text("0,25").tag(Float(0.25))
@@ -173,25 +191,27 @@ struct EditorInspectorPanel: View {
 
     private func channelBinding(_ channel: InspectorChannel) -> Binding<Float> {
         Binding {
-            guard let index = document.selectedIndex else { return 0 }
-            return channel.value(from: document.objects[index])
+            guard let index = viewModel.document.selectedIndex else { return 0 }
+            return channel.value(from: viewModel.document.objects[index])
         } set: { newValue in
-            guard let index = document.selectedIndex else { return }
-            document.beginChange()
-            channel.set(newValue, on: &document.objects[index])
-            document.endChange()
+            guard let index = viewModel.document.selectedIndex else { return }
+            viewModel.beginChange()
+            channel.set(newValue, on: &viewModel.document.objects[index])
+            viewModel.document.commitChange()
+            viewModel.endChange()
         }
     }
 
     private var materialColorBinding: Binding<Color> {
         Binding {
-            guard let index = document.selectedIndex else { return .white }
-            return document.objects[index].material.color
+            guard let index = viewModel.document.selectedIndex else { return .white }
+            return viewModel.document.objects[index].material.color
         } set: { newValue in
-            guard let index = document.selectedIndex else { return }
-            document.beginChange()
-            document.objects[index].material.color = newValue
-            document.endChange()
+            guard let index = viewModel.document.selectedIndex else { return }
+            viewModel.beginChange()
+            viewModel.document.objects[index].material.color = newValue
+            viewModel.document.commitChange()
+            viewModel.endChange()
         }
     }
 
@@ -199,13 +219,43 @@ struct EditorInspectorPanel: View {
         _ keyPath: WritableKeyPath<EditorMaterial, Float>
     ) -> Binding<Float> {
         Binding {
-            guard let index = document.selectedIndex else { return 0 }
-            return document.objects[index].material[keyPath: keyPath]
+            guard let index = viewModel.document.selectedIndex else { return 0 }
+            return viewModel.document.objects[index].material[keyPath: keyPath]
         } set: { newValue in
-            guard let index = document.selectedIndex else { return }
-            document.beginChange()
-            document.objects[index].material[keyPath: keyPath] = newValue
-            document.endChange()
+            guard let index = viewModel.document.selectedIndex else { return }
+            viewModel.beginChange()
+            viewModel.document.objects[index].material[keyPath: keyPath] = newValue
+            viewModel.document.commitChange()
+            viewModel.endChange()
+        }
+    }
+
+    private func selectedObjectBinding(
+        _ keyPath: WritableKeyPath<SceneObject, Bool>
+    ) -> Binding<Bool> {
+        Binding {
+            guard let index = viewModel.document.selectedIndex else { return false }
+            return viewModel.document.objects[index][keyPath: keyPath]
+        } set: { newValue in
+            guard let index = viewModel.document.selectedIndex else { return }
+            viewModel.beginChange()
+            viewModel.document.objects[index][keyPath: keyPath] = newValue
+            viewModel.document.commitChange()
+            viewModel.endChange()
+        }
+    }
+
+    private func documentBinding<Value: Equatable>(
+        _ keyPath: WritableKeyPath<ModelDocument, Value>
+    ) -> Binding<Value> {
+        Binding {
+            viewModel.document[keyPath: keyPath]
+        } set: { newValue in
+            guard viewModel.document[keyPath: keyPath] != newValue else { return }
+            viewModel.beginChange()
+            viewModel.document[keyPath: keyPath] = newValue
+            viewModel.document.commitChange()
+            viewModel.endChange()
         }
     }
 }

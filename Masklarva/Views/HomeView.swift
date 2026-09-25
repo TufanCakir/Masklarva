@@ -17,6 +17,11 @@ struct HomeView: View {
     @State private var isInspectorVisible = false
     @State private var isProjectPanelVisible = false
     @State private var projectPanelDetent: PresentationDetent = .height(190)
+    @State private var isRenamingObject = false
+    @State private var objectNameDraft = ""
+    @State private var isRenamingScene = false
+    @State private var sceneNameDraft = ""
+    @State private var isConfirmingSceneDeletion = false
 
     var body: some View {
         editorWorkspace
@@ -73,6 +78,32 @@ struct HomeView: View {
                 .presentationDetents([.height(240)])
                 .presentationDragIndicator(.visible)
             }
+            .alert("Objekt umbenennen", isPresented: $isRenamingObject) {
+                TextField("Name", text: $objectNameDraft)
+                Button("Umbenennen") {
+                    viewModel.renameSelection(to: objectNameDraft)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            }
+            .alert("Szene umbenennen", isPresented: $isRenamingScene) {
+                TextField("Name", text: $sceneNameDraft)
+                Button("Umbenennen") {
+                    viewModel.renameScene(to: sceneNameDraft)
+                }
+                Button("Abbrechen", role: .cancel) {}
+            }
+            .confirmationDialog(
+                "\"\(viewModel.project.activeSceneName)\" löschen?",
+                isPresented: $isConfirmingSceneDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("Szene löschen", role: .destructive) {
+                    viewModel.deleteScene()
+                }
+                Button("Abbrechen", role: .cancel) {}
+            } message: {
+                Text("Die Szene und alle enthaltenen Objekte werden entfernt.")
+            }
         }
     }
 
@@ -101,6 +132,72 @@ struct HomeView: View {
             Button("Projekt", systemImage: "folder") {
                 isProjectPanelVisible = true
             }
+
+            Menu("Szene", systemImage: "square.stack.3d.up") {
+                Section("Szenen") {
+                    ForEach(viewModel.project.scenes) { scene in
+                        Button {
+                            viewModel.selectScene(scene.id)
+                        } label: {
+                            if scene.id == viewModel.project.activeSceneID {
+                                Label(scene.name, systemImage: "checkmark")
+                            } else {
+                                Text(scene.name)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Button("Neue Szene", systemImage: "plus") {
+                        viewModel.createScene()
+                    }
+                    Button("Szene duplizieren", systemImage: "plus.square.on.square") {
+                        viewModel.duplicateScene()
+                    }
+                    Button("Szene umbenennen", systemImage: "pencil") {
+                        sceneNameDraft = viewModel.project.activeSceneName
+                        isRenamingScene = true
+                    }
+                    Button("Szene löschen", systemImage: "trash", role: .destructive) {
+                        isConfirmingSceneDeletion = true
+                    }
+                    .disabled(!viewModel.project.canDeleteScene)
+                }
+            }
+
+            Menu("Objekt", systemImage: "cube") {
+                Button("Umbenennen", systemImage: "pencil") {
+                    objectNameDraft = viewModel.selectedObjectName
+                    isRenamingObject = true
+                }
+                Button("Duplizieren", systemImage: "plus.square.on.square") {
+                    viewModel.duplicateSelection()
+                }
+                Divider()
+                Button("Kopieren", systemImage: "doc.on.doc") {
+                    viewModel.copySelection()
+                }
+                Button("Ausschneiden", systemImage: "scissors") {
+                    viewModel.cutSelection()
+                }
+                .disabled(viewModel.selectedObjectIsLocked)
+                Button("Einsetzen", systemImage: "doc.on.clipboard") {
+                    viewModel.paste()
+                }
+                .disabled(!viewModel.canPaste)
+                Divider()
+                Button(
+                    viewModel.selectedObjectIsLocked ? "Entsperren" : "Sperren",
+                    systemImage: viewModel.selectedObjectIsLocked ? "lock.open" : "lock"
+                ) {
+                    viewModel.toggleSelectionLock()
+                }
+                Button("Löschen", systemImage: "trash", role: .destructive) {
+                    viewModel.deleteSelection()
+                }
+                .disabled(viewModel.selectedObjectIsLocked)
+            }
+            .disabled(viewModel.document.selectedIndex == nil && !viewModel.canPaste)
 
             Menu("Export", systemImage: "square.and.arrow.up") {
                 ForEach(SceneExportFormat.allCases) { format in
@@ -158,7 +255,7 @@ struct HomeView: View {
 
             if isInspectorVisible {
                 EditorInspectorPanel(
-                    document: $viewModel.document,
+                    viewModel: viewModel,
                     selectedTool: viewModel.selectedTool
                 )
                 .frame(width: 220)
@@ -227,7 +324,8 @@ struct HomeView: View {
                                 } label: {
                                     Label(
                                         object.name,
-                                        systemImage: object.kind.symbol
+                                        systemImage: object.isLocked
+                                            ? "lock.fill" : object.kind.symbol
                                     )
                                     .lineLimit(1)
                                     .frame(
@@ -243,6 +341,17 @@ struct HomeView: View {
                                         : .clear,
                                     in: RoundedRectangle(cornerRadius: 8)
                                 )
+                                .opacity(object.isVisible ? 1 : 0.45)
+                                .contextMenu {
+                                    Button(object.isVisible ? "Ausblenden" : "Einblenden") {
+                                        viewModel.selectObject(object.id)
+                                        viewModel.toggleSelectionVisibility()
+                                    }
+                                    Button(object.isLocked ? "Entsperren" : "Sperren") {
+                                        viewModel.selectObject(object.id)
+                                        viewModel.toggleSelectionLock()
+                                    }
+                                }
                             }
                         }
                     }
@@ -280,7 +389,9 @@ struct HomeView: View {
                 orbit: $viewModel.orbit,
                 zoom: $viewModel.zoom,
                 cameraPan: $viewModel.cameraPan,
-                cameraMode: $viewModel.cameraMode
+                cameraMode: $viewModel.cameraMode,
+                beginProjectChange: viewModel.beginChange,
+                endProjectChange: viewModel.endChange
             )
             .dropDestination(for: ProjectMaterial.self) { materials, _ in
                 guard let material = materials.first else { return false }
@@ -297,7 +408,10 @@ struct HomeView: View {
             .allowsHitTesting(false)
 
             HStack(spacing: 0) {
-                Label("PERSPEKTIVE", systemImage: "view.3d")
+                Label(
+                    viewModel.project.activeSceneName,
+                    systemImage: "view.3d"
+                )
                 Spacer()
                 Label(
                     "\(viewModel.objectCount)",

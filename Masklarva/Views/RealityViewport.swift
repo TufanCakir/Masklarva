@@ -15,6 +15,8 @@ struct RealityViewport: View {
     @Binding var zoom: Float
     @Binding var cameraPan: SIMD2<Float>
     @Binding var cameraMode: CameraNavigationMode
+    let beginProjectChange: () -> Void
+    let endProjectChange: () -> Void
 
     @State private var dragStart: SceneTransform?
     @State private var draggedAxis: GizmoAxis?
@@ -132,7 +134,9 @@ struct RealityViewport: View {
                 }
 
                 if selectedTool == .points {
-                    guard let selected = document.selectedIndex else { return }
+                    guard let selected = document.selectedIndex,
+                        !document.objects[selected].isLocked
+                    else { return }
                     if draggedPointID == nil {
                         guard let id = pointID(from: value.entity),
                             let point = document.objects[selected]
@@ -140,6 +144,7 @@ struct RealityViewport: View {
                                     $0.id == id
                                 })
                         else { return }
+                        beginProjectChange()
                         document.beginChange()
                         draggedPointID = id
                         pointDragStart = point.position
@@ -167,7 +172,10 @@ struct RealityViewport: View {
                     if let id = objectID(from: value.entity) {
                         document.selectedID = id
                     }
-                    guard let selected = document.selectedIndex else { return }
+                    guard let selected = document.selectedIndex,
+                        !document.objects[selected].isLocked
+                    else { return }
+                    beginProjectChange()
                     document.beginChange()
                     dragStart = SceneTransform(
                         object: document.objects[selected]
@@ -194,6 +202,7 @@ struct RealityViewport: View {
             .onEnded { _ in
                 if dragStart != nil || pointDragStart != nil {
                     document.endChange()
+                    endProjectChange()
                 }
                 dragStart = nil
                 draggedAxis = nil
@@ -290,7 +299,7 @@ struct RealityViewport: View {
         let root = Entity()
         root.name = "EditorRoot"
 
-        for object in document.objects {
+        for object in document.objects where object.isVisible {
             root.addChild(
                 makeEntity(
                     for: object,
@@ -300,9 +309,9 @@ struct RealityViewport: View {
         }
 
         if let selected = document.objects.first(where: {
-            $0.id == document.selectedID
+            $0.id == document.selectedID && $0.isVisible
         }) {
-            if selectedTool != .points {
+            if selectedTool != .points && !selected.isLocked {
                 root.addChild(
                     makeGizmo(at: selected.position, objectID: selected.id)
                 )
@@ -352,7 +361,9 @@ struct RealityViewport: View {
     }
 
     private func updateSceneRoot(_ root: Entity) {
-        let validIDs = Set(document.objects.map { $0.id.uuidString })
+        let validIDs = Set(
+            document.objects.filter(\.isVisible).map { $0.id.uuidString }
+        )
 
         for child in root.children {
             if UUID(uuidString: child.name) != nil,
@@ -362,7 +373,7 @@ struct RealityViewport: View {
             }
         }
 
-        for object in document.objects {
+        for object in document.objects where object.isVisible {
             let entity: ModelEntity
             if let existing = root.findEntity(named: object.id.uuidString)
                 as? ModelEntity
@@ -383,13 +394,13 @@ struct RealityViewport: View {
         }
 
         if let selected = document.objects.first(where: {
-            $0.id == document.selectedID
+            $0.id == document.selectedID && $0.isVisible
         }) {
             let expectedName = gizmoName(for: selected.id)
             let existingGizmo = root.children.first {
                 $0.name.hasPrefix("gizmoRoot:")
             }
-            if selectedTool == .points {
+            if selectedTool == .points || selected.isLocked {
                 existingGizmo?.removeFromParent()
             } else if existingGizmo?.name == expectedName {
                 existingGizmo?.position = selected.position
