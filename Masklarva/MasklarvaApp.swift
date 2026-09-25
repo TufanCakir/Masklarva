@@ -9,9 +9,20 @@ import SwiftUI
 
 @main
 struct MasklarvaApp: App {
+    @AppStorage("hasCompletedOnboarding")
+    private var hasCompletedOnboarding = false
+
     var body: some Scene {
         WindowGroup {
-            RootView()
+            if hasCompletedOnboarding {
+                HomeView()
+                    .transition(.opacity)
+            } else {
+                OnboardingView {
+                    hasCompletedOnboarding = true
+                }
+                .transition(.opacity)
+            }
         }
     }
 }
