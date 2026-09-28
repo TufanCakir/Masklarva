@@ -109,12 +109,12 @@ struct RealityViewport: View {
         SpatialTapGesture()
             .targetedToAnyEntity()
             .onEnded { value in
-                if let pointID = pointID(from: value.entity),
+                if selectedTool == .points,
+                    let componentID = meshComponentID(from: value.entity),
                     let selected = document.selectedIndex
                 {
                     document.objects[selected].editableGeometry
-                        .selectedPointID =
-                        pointID
+                        .toggleSelection(componentID)
                     document.revision += 1
                     return
                 }
@@ -135,6 +135,7 @@ struct RealityViewport: View {
 
                 if selectedTool == .points {
                     guard let selected = document.selectedIndex,
+                        document.objects[selected].editableGeometry.selection.mode == .vertex,
                         !document.isEffectivelyLocked(document.objects[selected].id)
                     else { return }
                     if draggedPointID == nil {
@@ -462,7 +463,7 @@ struct RealityViewport: View {
             entity.model?.mesh = mesh
             entity.generateCollisionShapes(recursive: false)
         }
-        updatePointHandles(
+        updateMeshHandles(
             on: entity,
             object: object,
             visible: selected && selectedTool == .points
@@ -507,7 +508,7 @@ struct RealityViewport: View {
         }
         entity.generateCollisionShapes(recursive: false)
         entity.components.set(InputTargetComponent())
-        updatePointHandles(
+        updateMeshHandles(
             on: entity,
             object: object,
             visible: selected && selectedTool == .points
@@ -523,36 +524,111 @@ struct RealityViewport: View {
         descriptor.positions = MeshBuffers.Positions(
             object.editableGeometry.points.map(\.position)
         )
+        descriptor.normals = MeshBuffers.Normals(
+            object.editableGeometry.points.map(\.normal)
+        )
+        descriptor.textureCoordinates = MeshBuffers.TextureCoordinates(
+            object.editableGeometry.points.map(\.uv)
+        )
         descriptor.primitives = .triangles(
             object.editableGeometry.triangleIndices
         )
         return try? MeshResource.generate(from: [descriptor])
     }
 
-    private func updatePointHandles(
+    private func updateMeshHandles(
         on entity: ModelEntity,
         object: SceneObject,
         visible: Bool
     ) {
         entity.children
-            .filter { $0.name.hasPrefix("meshPoint:") }
+            .filter {
+                $0.name.hasPrefix("meshPoint:")
+                    || $0.name.hasPrefix("meshEdge:")
+                    || $0.name.hasPrefix("meshFace:")
+            }
             .forEach { $0.removeFromParent() }
         guard visible else { return }
-        for point in object.editableGeometry.points {
-            let isSelected =
-                point.id == object.editableGeometry.selectedPointID
-            let handle = ModelEntity(
-                mesh: .generateSphere(radius: isSelected ? 0.055 : 0.04),
-                materials: [
-                    UnlitMaterial(color: isSelected ? .systemYellow : .white)
-                ]
-            )
-            handle.name = "meshPoint:\(point.id.uuidString)"
-            handle.position = point.position
-            handle.generateCollisionShapes(recursive: false)
-            handle.components.set(InputTargetComponent())
-            entity.addChild(handle)
+
+        switch object.editableGeometry.selection.mode {
+        case .vertex:
+            addVertexHandles(to: entity, object: object)
+        case .edge:
+            addEdgeHandles(to: entity, object: object)
+        case .face:
+            addFaceHandles(to: entity, object: object)
         }
+    }
+
+    private func addVertexHandles(to entity: ModelEntity, object: SceneObject) {
+        for point in object.editableGeometry.points {
+            addMeshHandle(
+                to: entity,
+                name: "meshPoint:\(point.id.uuidString)",
+                position: point.position,
+                selected: object.editableGeometry.selection.vertexIDs.contains(point.id),
+                radius: 0.04,
+                color: .white
+            )
+        }
+    }
+
+    private func addEdgeHandles(to entity: ModelEntity, object: SceneObject) {
+        let positions = Dictionary(
+            uniqueKeysWithValues: object.editableGeometry.points.map { ($0.id, $0.position) }
+        )
+        for edge in object.editableGeometry.edges {
+            guard edge.vertexIDs.count == 2,
+                let start = positions[edge.vertexIDs[0]],
+                let end = positions[edge.vertexIDs[1]]
+            else { continue }
+            addMeshHandle(
+                to: entity,
+                name: "meshEdge:\(edge.id.uuidString)",
+                position: (start + end) / 2,
+                selected: object.editableGeometry.selection.edgeIDs.contains(edge.id),
+                radius: 0.05,
+                color: .systemCyan
+            )
+        }
+    }
+
+    private func addFaceHandles(to entity: ModelEntity, object: SceneObject) {
+        let positions = Dictionary(
+            uniqueKeysWithValues: object.editableGeometry.points.map { ($0.id, $0.position) }
+        )
+        for face in object.editableGeometry.faces {
+            let vertices = face.vertexIDs.compactMap { positions[$0] }
+            guard !vertices.isEmpty else { continue }
+            let center = vertices.reduce(SIMD3<Float>.zero, +) / Float(vertices.count)
+            addMeshHandle(
+                to: entity,
+                name: "meshFace:\(face.id.uuidString)",
+                position: center,
+                selected: object.editableGeometry.selection.faceIDs.contains(face.id),
+                radius: 0.065,
+                color: .systemBlue
+            )
+        }
+    }
+
+    private func addMeshHandle(
+        to entity: ModelEntity,
+        name: String,
+        position: SIMD3<Float>,
+        selected: Bool,
+        radius: Float,
+        color: UIColor
+    ) {
+        let handle = ModelEntity(
+            mesh: .generateSphere(radius: selected ? radius * 1.3 : radius),
+            materials: [UnlitMaterial(color: selected ? .systemYellow : color)]
+        )
+        handle.name = name
+        handle.position = position
+        handle.generateCollisionShapes(recursive: false)
+        handle.components.set(InputTargetComponent())
+        entity.addChild(handle)
     }
 
     private func makeMaterial(
@@ -679,12 +755,25 @@ struct RealityViewport: View {
     }
 
     private func pointID(from entity: Entity) -> UUID? {
+        meshComponentID(prefix: "meshPoint:", from: entity)
+    }
+
+    private func meshComponentID(from entity: Entity) -> UUID? {
+        for prefix in ["meshPoint:", "meshEdge:", "meshFace:"] {
+            if let id = meshComponentID(prefix: prefix, from: entity) {
+                return id
+            }
+        }
+        return nil
+    }
+
+    private func meshComponentID(prefix: String, from entity: Entity) -> UUID? {
         var current: Entity? = entity
         while let candidate = current {
-            if candidate.name.hasPrefix("meshPoint:") {
+            if candidate.name.hasPrefix(prefix) {
                 return UUID(
                     uuidString: String(
-                        candidate.name.dropFirst("meshPoint:".count)
+                        candidate.name.dropFirst(prefix.count)
                     )
                 )
             }

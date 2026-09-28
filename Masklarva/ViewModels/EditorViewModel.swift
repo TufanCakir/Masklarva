@@ -24,6 +24,7 @@ final class EditorViewModel {
     var projectStorageError: String?
     var lastSavedAt: Date?
     var isSavingProject = false
+    var meshValidationReport: MeshValidationReport?
     @ObservationIgnored private var history = EditorHistory()
     @ObservationIgnored private let projectStore: ProjectStore
     @ObservationIgnored private var autosaveTask: Task<Void, Never>?
@@ -78,6 +79,62 @@ final class EditorViewModel {
                 && $0.parentID == selectedObject.parentID
                 && !document.isEffectivelyLocked($0.id)
         }
+    }
+    var meshSelectionMode: MeshSelectionMode {
+        guard let selectedIndex = document.selectedIndex else { return .vertex }
+        return document.objects[selectedIndex].editableGeometry.selection.mode
+    }
+
+    var meshSelectionCount: Int {
+        guard let selectedIndex = document.selectedIndex else { return 0 }
+        let selection = document.objects[selectedIndex].editableGeometry.selection
+        return switch selection.mode {
+        case .vertex: selection.vertexIDs.count
+        case .edge: selection.edgeIDs.count
+        case .face: selection.faceIDs.count
+        }
+    }
+    var canSeparateMeshSelection: Bool {
+        guard meshSelectionMode == .face,
+            meshSelectionCount > 0,
+            let selectedIndex = document.selectedIndex
+        else { return false }
+        let object = document.objects[selectedIndex]
+        return !object.isGroup && !document.isEffectivelyLocked(object.id)
+    }
+    var canBevelSelectedEdge: Bool {
+        guard meshSelectionMode == .edge,
+            meshSelectionCount == 1,
+            let selectedIndex = document.selectedIndex
+        else { return false }
+        let object = document.objects[selectedIndex]
+        return !object.isGroup && !document.isEffectivelyLocked(object.id)
+    }
+    var canWeldSelectedVertices: Bool {
+        guard meshSelectionMode == .vertex,
+            meshSelectionCount >= 2,
+            let selectedIndex = document.selectedIndex
+        else { return false }
+        let object = document.objects[selectedIndex]
+        return !object.isGroup && !document.isEffectivelyLocked(object.id)
+    }
+    var canDuplicateMeshSelection: Bool {
+        guard meshSelectionCount > 0,
+            let selectedIndex = document.selectedIndex
+        else { return false }
+        let object = document.objects[selectedIndex]
+        return !object.isGroup && !document.isEffectivelyLocked(object.id)
+    }
+    var canSubdivideSelectedMesh: Bool {
+        guard let selectedIndex = document.selectedIndex else { return false }
+        let object = document.objects[selectedIndex]
+        return !object.isGroup
+            && !object.editableGeometry.faces.isEmpty
+            && !document.isEffectivelyLocked(object.id)
+    }
+    var canValidateSelectedMesh: Bool {
+        guard let selectedIndex = document.selectedIndex else { return false }
+        return !document.objects[selectedIndex].isGroup
     }
 
     func addPrimitive(_ kind: PrimitiveKind) {
@@ -183,6 +240,84 @@ final class EditorViewModel {
         }
     }
 
+    func setMeshSelectionMode(_ mode: MeshSelectionMode) {
+        mutateMeshSelection { $0.setSelectionMode(mode) }
+    }
+
+    func selectAllMeshElements() {
+        mutateMeshSelection { $0.selectAll() }
+    }
+
+    func deselectAllMeshElements() {
+        mutateMeshSelection { $0.deselectAll() }
+    }
+
+    func invertMeshSelection() {
+        mutateMeshSelection { $0.invertSelection() }
+    }
+
+    func deleteSelectedMeshGeometry() {
+        performChange { $0.activeDocument.deleteSelectedGeometry() }
+    }
+
+    func recalculateSelectedMeshNormals() {
+        performChange { $0.activeDocument.recalculateSelectedGeometryNormals() }
+    }
+
+    func separateSelectedMeshFaces() {
+        performChange { $0.activeDocument.separateSelectedFaces() }
+    }
+
+    func extrudeSelectedMeshFaces(distance: Float) {
+        performChange { $0.activeDocument.extrudeSelectedFaces(distance: distance) }
+    }
+
+    func insetSelectedMeshFaces(amount: Float) {
+        performChange { $0.activeDocument.insetSelectedFaces(amount: amount) }
+    }
+
+    func bevelSelectedMeshEdge(width: Float) {
+        performChange { $0.activeDocument.bevelSelectedEdge(width: width) }
+    }
+
+    func weldSelectedMeshVertices() {
+        performChange { $0.activeDocument.weldSelectedVerticesToCenter() }
+    }
+
+    func duplicateSelectedMeshGeometry() {
+        performChange { $0.activeDocument.duplicateSelectedGeometry() }
+    }
+
+    func duplicateSelectedMeshGeometry(offset: SIMD3<Float>) {
+        performChange {
+            $0.activeDocument.duplicateSelectedGeometry(offset: offset)
+        }
+    }
+
+    func flipSelectedMeshFaceNormals() {
+        performChange { $0.activeDocument.flipSelectedFaceNormals() }
+    }
+
+    func linearSubdivideSelectedMesh() {
+        performChange { $0.activeDocument.linearSubdivideSelectedObject() }
+    }
+
+    func catmullClarkSubdivideSelectedMesh(strength: Float) {
+        performChange {
+            $0.activeDocument.catmullClarkSubdivideSelectedObject(
+                strength: strength
+            )
+        }
+    }
+
+    func validateSelectedMesh() {
+        guard let selectedIndex = document.selectedIndex,
+            !document.objects[selectedIndex].isGroup
+        else { return }
+        meshValidationReport = document.objects[selectedIndex]
+            .editableGeometry.validationReport()
+    }
+
     func apply(_ material: ProjectMaterial) -> Bool {
         guard let selected = document.selectedIndex,
             !document.isEffectivelyLocked(document.objects[selected].id),
@@ -248,6 +383,17 @@ final class EditorViewModel {
         beginChange()
         mutation(&project)
         endChange()
+    }
+
+    private func mutateMeshSelection(
+        _ mutation: (inout EditableGeometry) -> Void
+    ) {
+        guard let selectedIndex = document.selectedIndex,
+            !document.objects[selectedIndex].isGroup
+        else { return }
+        mutation(&document.objects[selectedIndex].editableGeometry)
+        document.commitChange()
+        scheduleAutosave()
     }
 
     private func scheduleAutosave() {

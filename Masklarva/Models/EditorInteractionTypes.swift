@@ -56,7 +56,7 @@ enum EditorTool: CaseIterable, Identifiable {
         case .move: "Bewegen"
         case .rotate: "Drehen"
         case .scale: "Größe"
-        case .points: "Punkte"
+        case .points: "Mesh"
         case .sculpt: "Kneten"
         }
     }

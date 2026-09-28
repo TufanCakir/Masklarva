@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated struct MasklarvaProjectFile: Codable, Sendable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     var formatVersion: Int
     var project: MasklarvaProject

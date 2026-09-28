@@ -228,6 +228,148 @@ struct ModelDocument: Codable, Equatable, Sendable {
         endChange()
     }
 
+    mutating func deleteSelectedGeometry() {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.deleteSelectedGeometry() else {
+            return
+        }
+        endChange()
+    }
+
+    mutating func recalculateSelectedGeometryNormals() {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.recalculateNormals() else {
+            return
+        }
+        endChange()
+    }
+
+    mutating func separateSelectedFaces() {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        let source = objects[selectedIndex]
+        var sourceGeometry = source.editableGeometry
+        guard let extractedGeometry = sourceGeometry.extractSelectedFaces() else {
+            return
+        }
+
+        beginChange()
+        objects[selectedIndex].editableGeometry = sourceGeometry
+        var separatedObject = source
+        separatedObject.id = UUID()
+        separatedObject.name = uniqueObjectName(base: "\(source.name) Auswahl")
+        separatedObject.editableGeometry = extractedGeometry
+        separatedObject.isLocked = false
+        objects.append(separatedObject)
+        selectedID = separatedObject.id
+        endChange()
+    }
+
+    mutating func extrudeSelectedFaces(distance: Float) {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.extrudeSelectedFaces(
+            distance: distance
+        ) else { return }
+        endChange()
+    }
+
+    mutating func insetSelectedFaces(amount: Float) {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.insetSelectedFaces(
+            amount: amount
+        ) else { return }
+        endChange()
+    }
+
+    mutating func bevelSelectedEdge(width: Float) {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.bevelSelectedEdge(
+            width: width
+        ) else { return }
+        endChange()
+    }
+
+    mutating func weldSelectedVerticesToCenter() {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry
+            .weldSelectedVerticesToCenter()
+        else { return }
+        endChange()
+    }
+
+    mutating func duplicateSelectedGeometry(offset: SIMD3<Float> = .zero) {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.duplicateSelectedGeometry(
+            offset: offset
+        )
+        else { return }
+        endChange()
+    }
+
+    mutating func flipSelectedFaceNormals() {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.flipSelectedFaceNormals()
+        else { return }
+        endChange()
+    }
+
+    mutating func linearSubdivideSelectedObject() {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.linearSubdivide()
+        else { return }
+        endChange()
+    }
+
+    mutating func catmullClarkSubdivideSelectedObject(strength: Float) {
+        guard let selectedIndex,
+            !objects[selectedIndex].isGroup,
+            !isEffectivelyLocked(objects[selectedIndex].id)
+        else { return }
+        beginChange()
+        guard objects[selectedIndex].editableGeometry.catmullClarkSubdivide(
+            strength: strength
+        ) else { return }
+        endChange()
+    }
+
     mutating func renameSelected(to rawName: String) {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let selectedIndex, !name.isEmpty else { return }

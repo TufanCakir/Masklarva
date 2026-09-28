@@ -349,6 +349,12 @@ struct HomeView: View {
                             }
                         }
 
+                        if viewModel.selectedTool == .points {
+                            ShelfSection("MESH-AUSWAHL") {
+                                MeshSelectionControls(viewModel: viewModel)
+                            }
+                        }
+
                         ShelfSection("FORMEN") {
                             LazyVGrid(
                                 columns: [
